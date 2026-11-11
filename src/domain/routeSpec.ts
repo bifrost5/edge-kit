@@ -21,6 +21,8 @@ export type Policy = {
   denyIps?: string[];
   publicOwners?: string[];
   ownerTargets?: Record<string, string[]>;
+  maxRoutesPerOwner?: number;
+  ownerLimits?: Record<string, { maxRoutes?: number }>;
 };
 
 export type ValidateOptions = { aliasTargets?: boolean };
