@@ -47,9 +47,10 @@ export async function runEdgeAccess(
   name: string,
   policy: AccessPolicy,
   apply: boolean,
-  oauth?: unknown
+  oauth?: unknown,
+  appType?: 'ssh'
 ): Promise<EdgeCommandOutput> {
-  const result = await port.ensure(hostname, name, policy, { dryRun: !apply, oauth });
+  const result = await port.ensure(hostname, name, policy, { dryRun: !apply, oauth, appType });
   return { hostname, changed: result.changed, applied: apply, diff: result.diff, appId: result.appId, aud: result.aud };
 }
 
@@ -62,3 +63,12 @@ export const MANAGED_OAUTH_AGENT = {
   dynamic_client_registration: { enabled: true, allow_any_on_localhost: true, allow_any_on_loopback: true },
   grant: { access_token_lifetime: '15m', session_duration: '336h' },
 } as const;
+
+export async function runEdgeCa(
+  adapter: { ensureCa(hostname: string, opts: { dryRun: boolean }): Promise<{ changed: boolean; aud?: string; publicKey?: string; diff?: string }> },
+  hostname: string,
+  apply: boolean
+): Promise<{ hostname: string; changed: boolean; applied: boolean; diff?: string; publicKey?: string; aud?: string }> {
+  const r = await adapter.ensureCa(hostname, { dryRun: !apply });
+  return { hostname, changed: r.changed, applied: apply, diff: r.diff, publicKey: r.publicKey, aud: r.aud };
+}

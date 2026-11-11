@@ -81,6 +81,8 @@ export interface AccessEnsureOpts {
   dryRun: boolean;
   /** Managed OAuth for non-browser clients (MCP). Passed through as `oauth_configuration`. */
   oauth?: unknown;
+  /** App type: omit for the default 'self_hosted', or 'ssh' for browser-rendered SSH. */
+  appType?: 'ssh';
 }
 
 export interface AccessPort {

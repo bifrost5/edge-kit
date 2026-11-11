@@ -225,6 +225,30 @@ Each control is enforced by one file. `tests/compose/hardening.test.ts` parses e
   # {"statusCode":404,"message":"Howdy, you seem lost. Resources not found"}
   ```
 
+## Consumer contract (version 1)
+
+Another product may drive edge-kit through `edgectl` only. This is the surface it may rely on. Print the version with `edgectl contract`.
+
+Commands a consumer may use:
+
+- `register`, `unregister`, `unregister-owner <owner>`, `list --owner <owner>`, `reconcile`, `check`.
+- `policy-check [--file path]` validates a policy file before it is used (exit 2 with one error per line).
+- `contract` prints `{"contract":1,"version":"...","features":[...]}` and needs no environment.
+- `edge access <host[/path]> --name <n> --policy <json> [--type ssh] [--apply]` covers a host or one path (for example `sites.example.com/p/alice--*`).
+- `edge ca <host> [--apply]` ensures the short-lived SSH certificate CA of the Access app of that host.
+
+Policy fields a consumer may write: `ownerCidrs`, `publicOwners`, `reservedOwners`, `maxRoutesPerOwner`, `ownerLimits`.
+
+Rules edge-kit enforces for every consumer:
+
+- The path is forced to `/p/<owner>--<name>/`.
+- The owner matches `[a-z0-9]+`.
+- Reserved owners are refused, including the built-in prefix patterns (a trailing `*` matches a prefix).
+- The prefix is stripped by default.
+- The target must be inside the owner's `ownerCidrs`.
+
+Bump the contract number (`src/domain/contract.ts`) on any breaking change.
+
 ## Not done yet
 
 - No read-only GET against the real Cloudflare API has been run

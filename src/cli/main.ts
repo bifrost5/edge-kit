@@ -6,14 +6,16 @@ import { FileRouteStore } from '../adapters/fileStore.ts';
 import { TraefikFileRenderer } from '../adapters/traefikRenderer.ts';
 import { DockerTargetResolver } from '../adapters/dockerTargetResolver.ts';
 import { FileQuotaState } from '../adapters/fileQuotaState.ts';
-import { deriveId, isValidId, type Policy } from '../domain/routeSpec.ts';
+import { deriveId, isValidId, validatePolicy, type Policy } from '../domain/routeSpec.ts';
 import type { AccessPolicy, Clock } from '../domain/ports.ts';
 import { CloudflareTunnelIngressAdapter } from '../adapters/cloudflareIngress.ts';
 import { CloudflareDnsAdapter } from '../adapters/cloudflareDns.ts';
 import { CloudflareAccessAdapter } from '../adapters/cloudflareAccess.ts';
 import { accessTargetError } from '../adapters/cloudflareAccess.ts';
 import { checkRoutes } from '../application/targetCheck.ts';
-import { runEdgeAccess, runEdgeDns, runEdgeIngress } from './edgeCommands.ts';
+import { execFileSync } from 'node:child_process';
+import { EDGEKIT_CONTRACT, EDGEKIT_FEATURES } from '../domain/contract.ts';
+import { runEdgeAccess, runEdgeCa, runEdgeDns, runEdgeIngress } from './edgeCommands.ts';
 
 class RealClock implements Clock {
   now(): number {
@@ -83,7 +85,7 @@ async function runEdgeCli(
     process.exit(2);
   }
 
-  if (!['ingress', 'dns', 'access'].includes(subcommand)) {
+  if (!['ingress', 'dns', 'access', 'ca'].includes(subcommand)) {
     process.stderr.write(`Unknown edge subcommand: ${subcommand}\n`);
     process.exit(1);
   }
@@ -138,7 +140,25 @@ async function runEdgeCli(
         break;
       }
 
+      case 'ca': {
+        const accountId = process.env.CF_ACCOUNT_ID;
+        if (!accountId) {
+          process.stderr.write('CF_ACCOUNT_ID environment variable is required\n');
+          process.exit(1);
+        }
+        const adapter = new CloudflareAccessAdapter({ fetch, accountId, token });
+        const result = await runEdgeCa(adapter, hostname, apply);
+        process.stdout.write(JSON.stringify(result, null, 2) + '\n');
+        process.exit(0);
+        break;
+      }
+
       case 'access': {
+        const accessType = flags['type'];
+        if (accessType !== undefined && accessType !== 'ssh') {
+          process.stderr.write("edge access --type must be 'ssh' when set\n");
+          process.exit(2);
+        }
         const name = typeof flags['name'] === 'string' ? flags['name'] : undefined;
         const policyRaw = typeof flags['policy'] === 'string' ? flags['policy'] : undefined;
         if (!name || !policyRaw) {
@@ -171,7 +191,7 @@ async function runEdgeCli(
         }
 
         const adapter = new CloudflareAccessAdapter({ fetch, accountId, token });
-        const result = await runEdgeAccess(adapter, hostname, name, policy, apply, flags['oauth'] === true ? MANAGED_OAUTH_AGENT : undefined);
+        const result = await runEdgeAccess(adapter, hostname, name, policy, apply, flags['oauth'] === true ? MANAGED_OAUTH_AGENT : undefined, accessType === 'ssh' ? 'ssh' : undefined);
         process.stdout.write(JSON.stringify(result, null, 2) + '\n');
         process.exit(0);
         break;
@@ -187,6 +207,42 @@ async function runEdgeCli(
 async function main() {
   const args = process.argv.slice(2);
   const { command, flags, positionals } = parseArgs(args);
+
+  if (command === 'contract') {
+    // Needs no env vars and works when disabled.
+    let version = 'unknown';
+    try {
+      const root = path.resolve(import.meta.dirname, '../..');
+      version = execFileSync('git', ['-C', root, 'rev-parse', '--short', 'HEAD'], { encoding: 'utf8', stdio: ['ignore', 'pipe', 'ignore'] }).trim() || 'unknown';
+    } catch {
+      version = 'unknown';
+    }
+    process.stdout.write(JSON.stringify({ contract: EDGEKIT_CONTRACT, version, features: EDGEKIT_FEATURES }) + '\n');
+    process.exit(0);
+  }
+
+  if (command === 'policy-check') {
+    // Needs no ENABLED flag and does not read the state dirs.
+    const file = typeof flags['file'] === 'string' ? flags['file'] : process.env.EDGEKIT_POLICY;
+    if (!file) {
+      process.stderr.write('policy-check needs --file or EDGEKIT_POLICY\n');
+      process.exit(2);
+    }
+    let parsed: unknown;
+    try {
+      parsed = JSON.parse(await fs.readFile(file, 'utf8'));
+    } catch (err: unknown) {
+      process.stderr.write(`cannot read policy: ${err instanceof Error ? err.message : String(err)}\n`);
+      process.exit(2);
+    }
+    const errors = validatePolicy(parsed);
+    if (errors.length > 0) {
+      process.stderr.write(errors.join('\n') + '\n');
+      process.exit(2);
+    }
+    process.stdout.write(JSON.stringify({ ok: true }) + '\n');
+    process.exit(0);
+  }
 
   if (command.startsWith('edge ')) {
     await runEdgeCli(command, flags, positionals);
@@ -204,7 +260,7 @@ async function main() {
   }
 
   // When EDGEKIT_ENABLED is not '1', register/unregister/reconcile print 'edgekit disabled' to stderr and exit 3; list still works.
-  const isMutatingCommand = ['register', 'unregister', 'reconcile'].includes(command);
+  const isMutatingCommand = ['register', 'unregister', 'unregister-owner', 'reconcile'].includes(command);
   if (isMutatingCommand && enabledFlag !== '1') {
     process.stderr.write('edgekit disabled\n');
     process.exit(3);
@@ -344,8 +400,22 @@ async function main() {
         break;
       }
 
+      case 'unregister-owner': {
+        const owner = positionals[0] || (typeof flags['owner'] === 'string' ? flags['owner'] : undefined);
+        if (!owner || !/^[a-z0-9]+$/.test(owner)) {
+          process.stderr.write('unregister-owner requires a valid owner\n');
+          process.exit(2);
+        }
+        const removed = await manager.unregisterOwner(owner);
+        process.stdout.write(JSON.stringify({ removed }, null, 2) + '\n');
+        process.exit(0);
+        break;
+      }
+
       case 'list': {
-        const routes = await manager.list();
+        const all = await manager.list();
+        const ownerFilter = typeof flags['owner'] === 'string' ? flags['owner'] : undefined;
+        const routes = ownerFilter === undefined ? all : all.filter((r) => r.owner === ownerFilter);
         process.stdout.write(JSON.stringify(routes, null, 2) + '\n');
         process.exit(0);
         break;
