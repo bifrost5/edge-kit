@@ -15,7 +15,7 @@ import { accessTargetError } from '../adapters/cloudflareAccess.ts';
 import { checkRoutes } from '../application/targetCheck.ts';
 import { execFileSync } from 'node:child_process';
 import { EDGEKIT_CONTRACT, EDGEKIT_FEATURES } from '../domain/contract.ts';
-import { runEdgeAccess, runEdgeDns, runEdgeIngress } from './edgeCommands.ts';
+import { runEdgeAccess, runEdgeCa, runEdgeDns, runEdgeIngress } from './edgeCommands.ts';
 
 class RealClock implements Clock {
   now(): number {
@@ -85,7 +85,7 @@ async function runEdgeCli(
     process.exit(2);
   }
 
-  if (!['ingress', 'dns', 'access'].includes(subcommand)) {
+  if (!['ingress', 'dns', 'access', 'ca'].includes(subcommand)) {
     process.stderr.write(`Unknown edge subcommand: ${subcommand}\n`);
     process.exit(1);
   }
@@ -140,7 +140,25 @@ async function runEdgeCli(
         break;
       }
 
+      case 'ca': {
+        const accountId = process.env.CF_ACCOUNT_ID;
+        if (!accountId) {
+          process.stderr.write('CF_ACCOUNT_ID environment variable is required\n');
+          process.exit(1);
+        }
+        const adapter = new CloudflareAccessAdapter({ fetch, accountId, token });
+        const result = await runEdgeCa(adapter, hostname, apply);
+        process.stdout.write(JSON.stringify(result, null, 2) + '\n');
+        process.exit(0);
+        break;
+      }
+
       case 'access': {
+        const accessType = flags['type'];
+        if (accessType !== undefined && accessType !== 'ssh') {
+          process.stderr.write("edge access --type must be 'ssh' when set\n");
+          process.exit(2);
+        }
         const name = typeof flags['name'] === 'string' ? flags['name'] : undefined;
         const policyRaw = typeof flags['policy'] === 'string' ? flags['policy'] : undefined;
         if (!name || !policyRaw) {
@@ -173,7 +191,7 @@ async function runEdgeCli(
         }
 
         const adapter = new CloudflareAccessAdapter({ fetch, accountId, token });
-        const result = await runEdgeAccess(adapter, hostname, name, policy, apply, flags['oauth'] === true ? MANAGED_OAUTH_AGENT : undefined);
+        const result = await runEdgeAccess(adapter, hostname, name, policy, apply, flags['oauth'] === true ? MANAGED_OAUTH_AGENT : undefined, accessType === 'ssh' ? 'ssh' : undefined);
         process.stdout.write(JSON.stringify(result, null, 2) + '\n');
         process.exit(0);
         break;

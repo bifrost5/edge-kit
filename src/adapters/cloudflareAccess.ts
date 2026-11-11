@@ -61,9 +61,10 @@ export function sanitizeError(err: unknown, token: string): Error {
 }
 
 /** Request body per the Cloudflare ref: `type` and `domain` are required; inline policies need a name. */
-export function appBody(hostname: string, name: string, policies: AccessPolicy[], oauth?: unknown) {
+export function appBody(hostname: string, name: string, policies: AccessPolicy[], oauth?: unknown, appType: 'self_hosted' | 'ssh' = 'self_hosted') {
+  // VERIFY: field names against the Cloudflare reference (type 'ssh' for SSH apps).
   const body: Record<string, unknown> = {
-    type: 'self_hosted',
+    type: appType,
     name,
     domain: hostname,
     policies: policies.map((p, i) => ({ name: `${name} policy ${i + 1}`, ...p })),
@@ -164,6 +165,7 @@ export class CloudflareAccessAdapter implements AccessPort {
       name: String(app.name),
       domain: String(app.domain),
       aud: typeof app.aud === 'string' ? app.aud : undefined,
+      type: typeof app.type === 'string' ? app.type : undefined,
       oauth_configuration: app.oauth_configuration,
       policies: Array.isArray(app.policies) ? (app.policies as AccessPolicy[]) : undefined,
     }));
@@ -195,7 +197,8 @@ export class CloudflareAccessAdapter implements AccessPort {
         const samePolicies =
           (existing.policies ?? []).map(comparablePolicy).join('|') === desiredPolicies.map(comparablePolicy).join('|');
         const sameOauth = opts.oauth === undefined || JSON.stringify(existing.oauth_configuration ?? null) === JSON.stringify(opts.oauth);
-        if (existing.name === name && samePolicies && sameOauth) {
+        const sameType = opts.appType === undefined || existing.type === opts.appType;
+        if (existing.name === name && samePolicies && sameOauth && sameType) {
           // Idempotent: nothing to change
           return { changed: false, appId: existing.id, aud: existing.aud, diff: '' };
         }
@@ -207,7 +210,7 @@ export class CloudflareAccessAdapter implements AccessPort {
           return { changed: true, appId: existing.id, diff };
         }
 
-        await this.updateApp(existing.id, hostname, name, desiredPolicies, opts.oauth);
+        await this.updateApp(existing.id, hostname, name, desiredPolicies, opts.oauth, opts.appType);
         return { changed: true, appId: existing.id, aud: existing.aud, diff };
       }
 
@@ -217,7 +220,7 @@ export class CloudflareAccessAdapter implements AccessPort {
         return { changed: true, diff };
       }
 
-      const created = await this.createApp(hostname, name, desiredPolicies, opts.oauth);
+      const created = await this.createApp(hostname, name, desiredPolicies, opts.oauth, opts.appType);
       return { changed: true, appId: created.id, aud: created.aud, diff };
     } catch (err) {
       throw sanitizeError(err, this.token);
@@ -249,11 +252,50 @@ export class CloudflareAccessAdapter implements AccessPort {
     }
   }
 
+  /**
+   * Ensures a short-lived certificate CA exists for the Access app of `hostname`.
+   * VERIFY: field names against the Cloudflare reference
+   * (GET/POST /accounts/{id}/access/apps/{app_id}/ca, result.public_key and result.aud).
+   */
+  async ensureCa(
+    hostname: string,
+    opts: { dryRun: boolean }
+  ): Promise<{ changed: boolean; appId: string; aud?: string; publicKey?: string; diff?: string }> {
+    try {
+      const apps = await this.listApps();
+      const app = apps.find((a) => a.domain === hostname);
+      if (!app) throw new Error(`No Access app found for ${hostname}`);
+      const caUrl = `${this.getAppUrl(app.id)}/ca`;
+      const headers = { 'Authorization': `Bearer ${this.token}`, 'Content-Type': 'application/json' };
+
+      const got = await this.fetchFn(caUrl, { method: 'GET', headers });
+      if (got.ok) {
+        const found = ((await got.json().catch(() => undefined)) as { result?: { public_key?: string; aud?: string } | null } | undefined)?.result;
+        if (found && typeof found.public_key === 'string') {
+          return { changed: false, appId: app.id, aud: found.aud ?? app.aud, publicKey: found.public_key, diff: '' };
+        }
+      } else if (got.status !== 404) {
+        throw new Error(`Failed to read Access CA: HTTP ${got.status} ${got.statusText}`);
+      }
+
+      const diff = `+ ${hostname} AccessCA`;
+      if (opts.dryRun) return { changed: true, appId: app.id, aud: app.aud, diff };
+
+      const res = await this.fetchFn(caUrl, { method: 'POST', headers });
+      if (!res.ok) throw new Error(`Failed to create Access CA: HTTP ${res.status} ${res.statusText}`);
+      const created = ((await res.json().catch(() => undefined)) as { result?: { public_key?: string; aud?: string } } | undefined)?.result;
+      return { changed: true, appId: app.id, aud: created?.aud ?? app.aud, publicKey: created?.public_key, diff };
+    } catch (err) {
+      throw sanitizeError(err, this.token);
+    }
+  }
+
   private async createApp(
     hostname: string,
     name: string,
     policies: AccessPolicy[],
-    oauth?: unknown
+    oauth?: unknown,
+    appType?: 'ssh'
   ): Promise<{ id?: string; aud?: string }> {
     const res = await this.fetchFn(this.getBaseUrl(), {
       method: 'POST',
@@ -261,7 +303,7 @@ export class CloudflareAccessAdapter implements AccessPort {
         'Authorization': `Bearer ${this.token}`,
         'Content-Type': 'application/json',
       },
-      body: JSON.stringify(appBody(hostname, name, policies, oauth)),
+      body: JSON.stringify(appBody(hostname, name, policies, oauth, appType)),
     });
 
     if (!res.ok) {
@@ -282,14 +324,14 @@ export class CloudflareAccessAdapter implements AccessPort {
     };
   }
 
-  private async updateApp(appId: string, hostname: string, name: string, policies: AccessPolicy[], oauth?: unknown): Promise<void> {
+  private async updateApp(appId: string, hostname: string, name: string, policies: AccessPolicy[], oauth?: unknown, appType?: 'ssh'): Promise<void> {
     const res = await this.fetchFn(this.getAppUrl(appId), {
       method: 'PUT',
       headers: {
         'Authorization': `Bearer ${this.token}`,
         'Content-Type': 'application/json',
       },
-      body: JSON.stringify(appBody(hostname, name, policies, oauth)),
+      body: JSON.stringify(appBody(hostname, name, policies, oauth, appType)),
     });
 
     if (!res.ok) {
