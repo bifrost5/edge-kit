@@ -113,6 +113,17 @@ export class RouteManager {
     return [];
   }
 
+  private effectiveOwnerCap(owner: string): number {
+    const policy = this.deps.policy;
+    const ownerMax = policy.ownerLimits?.[owner]?.maxRoutes;
+    for (const v of [ownerMax, policy.maxRoutesPerOwner]) {
+      if (v !== undefined && (typeof v !== 'number' || !Number.isInteger(v) || v <= 0)) {
+        throw new Error(`Invalid policy: route cap must be a positive integer (got ${String(v)})`);
+      }
+    }
+    return ownerMax ?? policy.maxRoutesPerOwner ?? this.maxRoutesPerOwner;
+  }
+
   async register(input: unknown): Promise<RegisterResult> {
     const existingRoutes = await this.deps.store.list();
     // 1. Validation (pure, no I/O before validation passes)
@@ -123,6 +134,7 @@ export class RouteManager {
       throw new Error(`Validation failed: ${validationResult.errors.join(', ')}`);
     }
     const spec = validationResult.spec;
+    const ownerCap = this.effectiveOwnerCap(spec.owner);
     if (this.deps.aliasTargets) {
       const aliasErrors = await this.checkAlias(spec);
       if (aliasErrors.length > 0) {
@@ -142,9 +154,9 @@ export class RouteManager {
     // 3. Per-owner route cap: if this is a new route id, check cap
     if (!existing) {
       const ownerCount = existingRoutes.filter(r => r.owner === spec.owner).length;
-      if (ownerCount >= this.maxRoutesPerOwner) {
+      if (ownerCount >= ownerCap) {
         throw new Error(
-          `Max routes per owner exceeded for owner '${spec.owner}' (current: ${ownerCount}, max: ${this.maxRoutesPerOwner})`
+          `Max routes per owner exceeded for owner '${spec.owner}' (current: ${ownerCount}, max: ${ownerCap})`
         );
       }
     }
