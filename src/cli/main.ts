@@ -204,7 +204,7 @@ async function main() {
   }
 
   // When EDGEKIT_ENABLED is not '1', register/unregister/reconcile print 'edgekit disabled' to stderr and exit 3; list still works.
-  const isMutatingCommand = ['register', 'unregister', 'reconcile'].includes(command);
+  const isMutatingCommand = ['register', 'unregister', 'unregister-owner', 'reconcile'].includes(command);
   if (isMutatingCommand && enabledFlag !== '1') {
     process.stderr.write('edgekit disabled\n');
     process.exit(3);
@@ -344,8 +344,22 @@ async function main() {
         break;
       }
 
+      case 'unregister-owner': {
+        const owner = positionals[0] || (typeof flags['owner'] === 'string' ? flags['owner'] : undefined);
+        if (!owner || !/^[a-z0-9]+$/.test(owner)) {
+          process.stderr.write('unregister-owner requires a valid owner\n');
+          process.exit(2);
+        }
+        const removed = await manager.unregisterOwner(owner);
+        process.stdout.write(JSON.stringify({ removed }, null, 2) + '\n');
+        process.exit(0);
+        break;
+      }
+
       case 'list': {
-        const routes = await manager.list();
+        const all = await manager.list();
+        const ownerFilter = typeof flags['owner'] === 'string' ? flags['owner'] : undefined;
+        const routes = ownerFilter === undefined ? all : all.filter((r) => r.owner === ownerFilter);
         process.stdout.write(JSON.stringify(routes, null, 2) + '\n');
         process.exit(0);
         break;

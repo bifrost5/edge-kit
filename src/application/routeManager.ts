@@ -197,6 +197,18 @@ export class RouteManager {
     return routes;
   }
 
+  // Removes every route of one owner through the normal unregister path. Idempotent.
+  async unregisterOwner(owner: string): Promise<string[]> {
+    const routes = await this.deps.store.list();
+    const removed: string[] = [];
+    for (const r of routes) {
+      if (r.owner !== owner) continue;
+      await this.unregister(r.id);
+      removed.push(r.id);
+    }
+    return removed;
+  }
+
   async reconcile(): Promise<{ written: string[]; removed: string[]; skipped?: { id: string; errors: string[] }[] }> {
     const storeRoutes = await this.deps.store.list();
     const validStoreRouteMap = new Map<string, RouteSpec>();
