@@ -243,7 +243,7 @@ Rules edge-kit enforces for every consumer:
 
 - The path is forced to `/p/<owner>--<name>/`.
 - The owner matches `[a-z0-9]+`.
-- Owners starting with `foundry` are reserved.
+- Reserved owners are refused, including the built-in prefix patterns (a trailing `*` matches a prefix).
 - The prefix is stripped by default.
 - The target must be inside the owner's `ownerCidrs`.
 
