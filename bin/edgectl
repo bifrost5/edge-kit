@@ -6,7 +6,7 @@ REPO_DIR="$(cd "${SCRIPT_DIR}/.." && pwd)"
 
 # Read-only commands that need no state dir and no lock.
 case "${1:-}" in
-  contract)
+  contract|policy-check)
     exec node "${REPO_DIR}/src/cli/main.ts" "$@"
     ;;
 esac

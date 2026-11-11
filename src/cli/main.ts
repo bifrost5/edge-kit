@@ -6,7 +6,7 @@ import { FileRouteStore } from '../adapters/fileStore.ts';
 import { TraefikFileRenderer } from '../adapters/traefikRenderer.ts';
 import { DockerTargetResolver } from '../adapters/dockerTargetResolver.ts';
 import { FileQuotaState } from '../adapters/fileQuotaState.ts';
-import { deriveId, isValidId, type Policy } from '../domain/routeSpec.ts';
+import { deriveId, isValidId, validatePolicy, type Policy } from '../domain/routeSpec.ts';
 import type { AccessPolicy, Clock } from '../domain/ports.ts';
 import { CloudflareTunnelIngressAdapter } from '../adapters/cloudflareIngress.ts';
 import { CloudflareDnsAdapter } from '../adapters/cloudflareDns.ts';
@@ -200,6 +200,29 @@ async function main() {
       version = 'unknown';
     }
     process.stdout.write(JSON.stringify({ contract: EDGEKIT_CONTRACT, version, features: EDGEKIT_FEATURES }) + '\n');
+    process.exit(0);
+  }
+
+  if (command === 'policy-check') {
+    // Needs no ENABLED flag and does not read the state dirs.
+    const file = typeof flags['file'] === 'string' ? flags['file'] : process.env.EDGEKIT_POLICY;
+    if (!file) {
+      process.stderr.write('policy-check needs --file or EDGEKIT_POLICY\n');
+      process.exit(2);
+    }
+    let parsed: unknown;
+    try {
+      parsed = JSON.parse(await fs.readFile(file, 'utf8'));
+    } catch (err: unknown) {
+      process.stderr.write(`cannot read policy: ${err instanceof Error ? err.message : String(err)}\n`);
+      process.exit(2);
+    }
+    const errors = validatePolicy(parsed);
+    if (errors.length > 0) {
+      process.stderr.write(errors.join('\n') + '\n');
+      process.exit(2);
+    }
+    process.stdout.write(JSON.stringify({ ok: true }) + '\n');
     process.exit(0);
   }
 

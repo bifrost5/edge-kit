@@ -120,6 +120,70 @@ function ipMatchesCidr(ipNum: number, cidr: string): boolean {
 
 const SITE_PATH_PREFIX_REGEX = /^\/[a-zA-Z0-9._~/-]*$/;
 
+const POLICY_KEYS = new Set([
+  'reservedOwners', 'allowedHosts', 'siteHosts', 'ownerCidrs', 'denyIps', 'publicOwners',
+  'ownerTargets', 'maxRoutesPerOwner', 'ownerLimits',
+]);
+
+function isStringArray(v: unknown): v is string[] {
+  return Array.isArray(v) && v.every((x) => typeof x === 'string');
+}
+
+function isPositiveInt(v: unknown): boolean {
+  return typeof v === 'number' && Number.isInteger(v) && v > 0;
+}
+
+// Returns error strings for a policy file. An empty array means the policy is valid.
+export function validatePolicy(policy: unknown): string[] {
+  if (typeof policy !== 'object' || policy === null || Array.isArray(policy)) {
+    return ['policy must be a JSON object'];
+  }
+  const p = policy as Record<string, unknown>;
+  const errors: string[] = [];
+  for (const k of Object.keys(p)) {
+    if (!POLICY_KEYS.has(k)) errors.push(`unknown key '${k}'`);
+  }
+  if (!Array.isArray(p['allowedHosts']) || p['allowedHosts'].length === 0 || !p['allowedHosts'].every((h) => typeof h === 'string' && HOST_REGEX.test(h))) {
+    errors.push('allowedHosts must be a non-empty array of host strings');
+  }
+  for (const k of ['siteHosts', 'publicOwners', 'reservedOwners']) {
+    if (p[k] !== undefined && !isStringArray(p[k])) errors.push(`${k} must be an array of strings`);
+  }
+  if (Array.isArray(p['siteHosts']) && !p['siteHosts'].every((h) => typeof h === 'string' && HOST_REGEX.test(h))) {
+    errors.push('siteHosts must be an array of host strings');
+  }
+  const cidrs = p['ownerCidrs'];
+  if (typeof cidrs !== 'object' || cidrs === null || Array.isArray(cidrs)) {
+    errors.push('ownerCidrs must be an object of owner to CIDR arrays');
+  } else {
+    for (const [owner, list] of Object.entries(cidrs)) {
+      if (!isStringArray(list) || !list.every((c) => parseCidr(c) !== null)) {
+        errors.push(`ownerCidrs.${owner} must be an array of valid IPv4 CIDRs`);
+      }
+    }
+  }
+  if (p['denyIps'] !== undefined && (!isStringArray(p['denyIps']) || !p['denyIps'].every((c) => parseCidr(c) !== null))) {
+    errors.push('denyIps must be an array of valid CIDRs');
+  }
+  if (p['maxRoutesPerOwner'] !== undefined && !isPositiveInt(p['maxRoutesPerOwner'])) {
+    errors.push('maxRoutesPerOwner must be a positive integer');
+  }
+  const limits = p['ownerLimits'];
+  if (limits !== undefined) {
+    if (typeof limits !== 'object' || limits === null || Array.isArray(limits)) {
+      errors.push('ownerLimits must be an object');
+    } else {
+      for (const [owner, v] of Object.entries(limits)) {
+        const max = (v as { maxRoutes?: unknown } | null)?.maxRoutes;
+        if (typeof v !== 'object' || v === null || (max !== undefined && !isPositiveInt(max))) {
+          errors.push(`ownerLimits.${owner}.maxRoutes must be a positive integer`);
+        }
+      }
+    }
+  }
+  return errors;
+}
+
 function normalizePathPrefix(p: string): string {
   if (p === '/') return '/';
   return p.replace(/\/+$/, '');
