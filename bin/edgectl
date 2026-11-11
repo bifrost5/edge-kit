@@ -4,6 +4,13 @@ set -euo pipefail
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 REPO_DIR="$(cd "${SCRIPT_DIR}/.." && pwd)"
 
+# Read-only commands that need no state dir and no lock.
+case "${1:-}" in
+  contract)
+    exec node "${REPO_DIR}/src/cli/main.ts" "$@"
+    ;;
+esac
+
 if [ -z "${EDGEKIT_STATE_DIR:-}" ]; then
   echo "EDGEKIT_STATE_DIR is required" >&2
   exit 1

@@ -13,6 +13,8 @@ import { CloudflareDnsAdapter } from '../adapters/cloudflareDns.ts';
 import { CloudflareAccessAdapter } from '../adapters/cloudflareAccess.ts';
 import { accessTargetError } from '../adapters/cloudflareAccess.ts';
 import { checkRoutes } from '../application/targetCheck.ts';
+import { execFileSync } from 'node:child_process';
+import { EDGEKIT_CONTRACT, EDGEKIT_FEATURES } from '../domain/contract.ts';
 import { runEdgeAccess, runEdgeDns, runEdgeIngress } from './edgeCommands.ts';
 
 class RealClock implements Clock {
@@ -187,6 +189,19 @@ async function runEdgeCli(
 async function main() {
   const args = process.argv.slice(2);
   const { command, flags, positionals } = parseArgs(args);
+
+  if (command === 'contract') {
+    // Needs no env vars and works when disabled.
+    let version = 'unknown';
+    try {
+      const root = path.resolve(import.meta.dirname, '../..');
+      version = execFileSync('git', ['-C', root, 'rev-parse', '--short', 'HEAD'], { encoding: 'utf8', stdio: ['ignore', 'pipe', 'ignore'] }).trim() || 'unknown';
+    } catch {
+      version = 'unknown';
+    }
+    process.stdout.write(JSON.stringify({ contract: EDGEKIT_CONTRACT, version, features: EDGEKIT_FEATURES }) + '\n');
+    process.exit(0);
+  }
 
   if (command.startsWith('edge ')) {
     await runEdgeCli(command, flags, positionals);
