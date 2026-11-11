@@ -11,6 +11,7 @@ import type { AccessPolicy, Clock } from '../domain/ports.ts';
 import { CloudflareTunnelIngressAdapter } from '../adapters/cloudflareIngress.ts';
 import { CloudflareDnsAdapter } from '../adapters/cloudflareDns.ts';
 import { CloudflareAccessAdapter } from '../adapters/cloudflareAccess.ts';
+import { accessTargetError } from '../adapters/cloudflareAccess.ts';
 import { checkRoutes } from '../application/targetCheck.ts';
 import { runEdgeAccess, runEdgeDns, runEdgeIngress } from './edgeCommands.ts';
 
@@ -142,6 +143,12 @@ async function runEdgeCli(
         const policyRaw = typeof flags['policy'] === 'string' ? flags['policy'] : undefined;
         if (!name || !policyRaw) {
           process.stderr.write('edge access requires --name and --policy\n');
+          process.exit(2);
+        }
+
+        const targetError = accessTargetError(hostname);
+        if (targetError) {
+          process.stderr.write(`${targetError}\n`);
           process.exit(2);
         }
 

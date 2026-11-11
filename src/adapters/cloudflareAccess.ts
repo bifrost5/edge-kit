@@ -72,6 +72,18 @@ export function appBody(hostname: string, name: string, policies: AccessPolicy[]
   return body;
 }
 
+const ACCESS_PATH_RE = /^\/[a-zA-Z0-9._~/*-]*$/;
+
+/** Returns an error message when `host[/path]` has a bad path, else undefined. Plain hosts pass. */
+export function accessTargetError(target: string): string | undefined {
+  const slash = target.indexOf('/');
+  if (slash === -1) return undefined;
+  if (slash === 0 || !ACCESS_PATH_RE.test(target.slice(slash))) {
+    return `edge access path must match ${ACCESS_PATH_RE.source}`;
+  }
+  return undefined;
+}
+
 export class CloudflareAccessAdapter implements AccessPort {
   private readonly fetchFn: typeof fetch;
   private readonly accountId: string;
@@ -172,6 +184,8 @@ export class CloudflareAccessAdapter implements AccessPort {
     policy: AccessPolicy,
     opts: AccessEnsureOpts
   ): Promise<{ changed: boolean; appId?: string; aud?: string; diff?: string }> {
+    const targetError = accessTargetError(hostname);
+    if (targetError) throw new Error(targetError);
     try {
       const apps = await this.listApps();
       const existing = apps.find((a) => a.domain === hostname);
