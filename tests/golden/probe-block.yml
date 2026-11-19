@@ -14,6 +14,16 @@ http:
         - edgekit-security@file
       service: edgekit-scanner-blackhole
 
+    # Test-user secrets (a project's secrets/ folder, test-users.json) are never served, whatever the route.
+    edgekit-secrets-block:
+      rule: "PathRegexp(`(^|/)(secrets(/|$)|test-users\\.json$)`)"
+      entryPoints:
+        - web
+      priority: 1000
+      middlewares:
+        - edgekit-security@file
+      service: edgekit-scanner-blackhole
+
   services:
     edgekit-scanner-blackhole:
       loadBalancer:
