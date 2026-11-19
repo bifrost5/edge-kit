@@ -61,3 +61,17 @@ test('golden test: dynamic/probe-block.yml matches tests/golden/probe-block.yml 
     'blackhole service must point at the discard port'
   );
 });
+
+test('secrets-block router: any path with a secrets segment or test-users.json never reaches an app', async () => {
+  const parsed: any = parse(await fs.readFile(path.join(process.cwd(), 'dynamic/probe-block.yml'), 'utf8'));
+  const router = parsed.http.routers?.['edgekit-secrets-block'];
+  assert.ok(router, 'edgekit-secrets-block router must exist');
+  assert.equal(router.priority, 1000);
+  assert.deepEqual(router.entryPoints, ['web']);
+  assert.equal(router.service, 'edgekit-scanner-blackhole');
+  const m = /^PathRegexp\(`(.+)`\)$/.exec(router.rule);
+  assert.ok(m, `rule must be one PathRegexp, got ${router.rule}`);
+  const re = new RegExp(m[1]);
+  for (const p of ['/secrets/test-users.json', '/p/casa--montessori/secrets/x', '/secrets', '/a/test-users.json']) assert.ok(re.test(p), `must block ${p}`);
+  for (const p of ['/p/casa--montessori/', '/assets/secretsPanel.js', '/docs/secrets.md', '/mysecrets/x']) assert.ok(!re.test(p), `must not block ${p}`);
+});
