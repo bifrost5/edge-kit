@@ -1,0 +1,14 @@
+{
+  "cortex": {
+    "SessionStart": [
+      {
+        "command": "command -v cortex >/dev/null 2>&1 && cortex hook agy SessionStart || echo '{}'"
+      }
+    ],
+    "PreInvocation": [
+      {
+        "command": "command -v cortex >/dev/null 2>&1 && cortex hook agy PreInvocation || echo '{}'"
+      }
+    ]
+  }
+}

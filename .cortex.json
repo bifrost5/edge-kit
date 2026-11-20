@@ -1,0 +1,9 @@
+{
+  "project": "edge-kit",
+  "base_branch": "develop",
+  "modes": [
+    "status",
+    "prompt",
+    "tool"
+  ]
+}
