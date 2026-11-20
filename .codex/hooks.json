@@ -1,0 +1,37 @@
+{
+  "hooks": {
+    "SessionStart": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "command -v cortex >/dev/null 2>&1 && cortex hook codex SessionStart || echo '{}'",
+            "timeout": 10
+          }
+        ]
+      }
+    ],
+    "UserPromptSubmit": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "command -v cortex >/dev/null 2>&1 && cortex hook codex UserPromptSubmit || echo '{}'",
+            "timeout": 10
+          }
+        ]
+      }
+    ],
+    "PostToolUse": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "command -v cortex >/dev/null 2>&1 && cortex hook codex PostToolUse || echo '{}'",
+            "timeout": 10
+          }
+        ]
+      }
+    ]
+  }
+}

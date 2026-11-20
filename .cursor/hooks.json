@@ -1,0 +1,17 @@
+{
+  "version": 1,
+  "hooks": {
+    "sessionStart": [
+      {
+        "command": "command -v cortex >/dev/null 2>&1 && cortex hook cursor sessionStart || echo '{}'",
+        "timeout": 10
+      }
+    ],
+    "postToolUse": [
+      {
+        "command": "command -v cortex >/dev/null 2>&1 && cortex hook cursor postToolUse || echo '{}'",
+        "timeout": 10
+      }
+    ]
+  }
+}
